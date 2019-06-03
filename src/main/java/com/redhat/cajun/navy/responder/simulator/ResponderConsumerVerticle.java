@@ -1,16 +1,19 @@
 package com.redhat.cajun.navy.responder.simulator;
 
+import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_INQUEUE;
+
+import java.util.HashMap;
+import java.util.Map;
+
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import io.vertx.kafka.client.consumer.KafkaConsumer;
-
-import java.util.HashMap;
-import java.util.Map;
-
-import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_INQUEUE;
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.config.SslConfigs;
 
 public class ResponderConsumerVerticle extends AbstractVerticle {
 
@@ -23,12 +26,19 @@ public class ResponderConsumerVerticle extends AbstractVerticle {
     @Override
     public void start(Future<Void> startFuture) throws Exception {
 
-        config.put("bootstrap.servers", config().getString("kafka.connect", "localhost:9092"));
-        config.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-        config.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-        config.put("group.id", config().getString("kafka.group.id"));
-        config.put("auto.offset.reset", "earliest");
-        config.put("enable.auto.commit",config().getBoolean("kafka.autocommit", true).toString());
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, config().getString("kafka.connect", "localhost:9092"));
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, config().getString("kafka.group.id"));
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,config().getBoolean("kafka.autocommit", true).toString());
+        config.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, config().getString("kafka.security.protocol"));
+        config.put(SslConfigs.SSL_KEYSTORE_TYPE_CONFIG, config().getString("kafka.ssl.keystore.type"));
+        config.put(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, config().getString("kafka.ssl.keystore.location"));
+        config.put(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, config().getString("kafka.ssl.keystore.password"));
+        config.put(SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG, config().getString("kafka.ssl.truststore.type"));
+        config.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, config().getString("kafka.ssl.truststore.location"));
+        config.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, config().getString("kafka.ssl.truststore.password"));
 
         responderUpdatedTopic = config().getString("kafka.sub");
 
