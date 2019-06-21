@@ -1,7 +1,12 @@
 package com.redhat.cajun.navy.responder.simulator;
 
-import com.redhat.cajun.navy.responder.simulator.data.MissionCommand;
+import static com.redhat.cajun.navy.responder.simulator.EventConfig.REST_EP;
+import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_INQUEUE;
+
+import java.util.ArrayList;
+
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.eventbus.Message;
@@ -10,15 +15,12 @@ import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
+import io.vertx.ext.healthchecks.HealthCheckHandler;
+import io.vertx.ext.healthchecks.Status;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.micrometer.PrometheusScrapingHandler;
-
-import java.util.ArrayList;
-
-import static com.redhat.cajun.navy.responder.simulator.EventConfig.REST_EP;
-import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_INQUEUE;
 
 public class RestVerticle extends AbstractVerticle {
 
@@ -35,6 +37,7 @@ public class RestVerticle extends AbstractVerticle {
         vertx.eventBus().consumer(config().getString(REST_EP, REST_EP), this::onMessage);
 
         int port = config().getInteger("http.port", 8080);
+        int managementport = config().getInteger("management.port", 9080);
         Router router = Router.router(vertx);
         router.route("/").handler(routingContext -> {
             HttpServerResponse response = routingContext.response();
@@ -45,11 +48,17 @@ public class RestVerticle extends AbstractVerticle {
 
         router.route("/api/responders*").handler(BodyHandler.create());
         router.post("/api/responders").handler(this::putHuman);
-        router.route("/metrics").handler(PrometheusScrapingHandler.create());
         router.get("/stats/r").handler(this::getRespondersInSim);
         router.get("/stats/mc").handler(this::getMissionCommandsRecieved);
 
+        Router mgmtRouter = Router.router(vertx);
+        mgmtRouter.route("/metrics").handler(PrometheusScrapingHandler.create());
+        HealthCheckHandler healthCheckHandler = HealthCheckHandler.create(vertx)
+                .register("health", f -> f.complete(Status.OK()));
+        mgmtRouter.get("/health").handler(healthCheckHandler);
 
+        Future<Void> httpServerFuture = Future.future();
+        Future<Void> managementServerFuture = Future.future();
 
         vertx.createHttpServer()
                 .requestHandler(router::accept)
@@ -57,13 +66,33 @@ public class RestVerticle extends AbstractVerticle {
                         result -> {
                             if (result.succeeded()) {
                                 logger.info("Http Server listening on port "+port);
-                                fut.complete();
+                                httpServerFuture.complete();
                             } else {
                                 logger.error("Http Server didnt start "+result.cause());
-                                fut.fail(result.cause());
+                                httpServerFuture.fail(result.cause());
                             }
                         }
                 );
+
+        vertx.createHttpServer()
+                .requestHandler(mgmtRouter)
+                .listen(managementport, ar -> {
+                    if (ar.succeeded()) {
+                        managementServerFuture.complete();
+                        logger.info("Management Http Server Listening on: "+ managementport);
+                    } else {
+                        managementServerFuture.fail(ar.cause());
+                    }
+                });
+
+        CompositeFuture.all(httpServerFuture, managementServerFuture).setHandler(ar -> {
+            if (ar.succeeded()) {
+                fut.complete();
+            } else {
+                fut.fail(ar.cause());
+            }
+        });
+
     }
 
 
