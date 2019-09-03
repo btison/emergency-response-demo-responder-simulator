@@ -1,5 +1,18 @@
 package com.redhat.cajun.navy.responder.simulator;
 
+import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_INQUEUE;
+import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_OUTQUEUE;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+
 import com.redhat.cajun.navy.responder.simulator.data.Mission;
 import com.redhat.cajun.navy.responder.simulator.data.MissionCommand;
 import com.redhat.cajun.navy.responder.simulator.data.Responder;
@@ -17,14 +30,6 @@ import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.WebClient;
 
 
-
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-
-import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_INQUEUE;
-import static com.redhat.cajun.navy.responder.simulator.EventConfig.RES_OUTQUEUE;
-
-
 public class SimulationControl extends AbstractVerticle {
 
     Logger logger = LoggerFactory.getLogger(SimulationControl.class);
@@ -34,6 +39,7 @@ public class SimulationControl extends AbstractVerticle {
     String uri = "/responder/";
     String host = "responder-service.naps-emergency-response.svc";
     int port = 8080;
+    double distanceUnit;
 
     private int defaultTime = 5000;
 
@@ -66,9 +72,7 @@ public class SimulationControl extends AbstractVerticle {
         host = config().getString("responder.service");
         uri = config().getString("responder.endpoint");
         port = config().getInteger("responder.port");
-        System.out.println("IncidentService located at: "+host + uri);
-
-
+        distanceUnit = config().getDouble("simulator.distance.unit", 1500.0);
 
         // subscribe to Eventbus for incoming messages
         vertx.eventBus().consumer(config().getString(RES_INQUEUE, RES_INQUEUE), this::onMessage);
@@ -127,24 +131,24 @@ public class SimulationControl extends AbstractVerticle {
 
     }
 
-    protected void createMessage(Responder r){
-            if(humanMessageCheck(r)) {
-                if (r.peek().isWayPoint())
-                    r.setStatus(Responder.Status.PICKEDUP);
+    protected void createMessage(Responder r) {
+        r.calculateNextLocation();
+        if (humanMessageCheck(r)) {
+            if (r.peek().isWayPoint())
+                r.setStatus(Responder.Status.PICKEDUP);
 
-                else if (r.peek().isDestination())
-                    r.setStatus(Responder.Status.DROPPED);
+            else if (r.peek().isDestination())
+                r.setStatus(Responder.Status.DROPPED);
 
-                else
-                    r.setStatus(Responder.Status.MOVING);
+            else
+                r.setStatus(Responder.Status.MOVING);
 
-                sendMessage(r);
-                r.nextLocation();
-            }
-            else{
-                sendMessage(r);
-                r.nextLocation();
-            }
+            sendMessage(r);
+            r.nextLocation();
+        } else {
+            sendMessage(r);
+            r.nextLocation();
+        }
 
     }
 
@@ -203,6 +207,7 @@ public class SimulationControl extends AbstractVerticle {
                 try {
                     logger.info(mc);
                         Responder r = getResponder(mc, MessageType.MissionStartedEvent);
+                        r.setDistanceUnit(distanceUnit);
                         if (!responders.contains(r))
                             synchronized (this) {
                                 responders.add(r);
@@ -315,6 +320,7 @@ public class SimulationControl extends AbstractVerticle {
                 }).doOnSuccess(aBoolean -> {
                     r.setHuman(aBoolean);
                 }).subscribe();
+
             return r;
         }
 
