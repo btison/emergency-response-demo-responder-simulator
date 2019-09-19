@@ -1,11 +1,13 @@
 package com.redhat.cajun.navy.responder.simulator.data;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import io.vertx.core.json.Json;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
-import java.util.*;
-import rx.Observable;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import io.vertx.core.json.Json;
 
 public class Mission {
     private String id;
@@ -156,6 +158,8 @@ public class Mission {
         r.setMissionId(id);
         r.setIncidentId(incidentId);
         r.setQueue(new LinkedList<>(getSteps()));
+        r.setCurrentLat(responderStartLat);
+        r.setCurrentLon(responderStartLong);
         return r;
     }
 
