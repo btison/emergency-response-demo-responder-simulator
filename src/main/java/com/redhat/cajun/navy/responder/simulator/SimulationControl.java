@@ -335,7 +335,7 @@ public class SimulationControl extends AbstractVerticle {
     protected CompletableFuture<Boolean> getResponder(String id){
 
         CompletableFuture<Boolean> request = new CompletableFuture<>();
-        client.get(port, host, uri+id)
+        client.get(port, host, uri + id)
                 .send(ar -> {
                     if (ar.succeeded()) {
                         // Obtain response
@@ -349,11 +349,7 @@ public class SimulationControl extends AbstractVerticle {
                         request.complete(false);
                     }
                 });
-
-            request.complete(false);
-            return request;
-
-
+        return request;
     }
 
 
