@@ -1,9 +1,11 @@
 package com.redhat.cajun.navy.responder.simulator.data;
 
 
-import io.vertx.core.json.Json;
-
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
+
+import io.vertx.core.json.Json;
 
 public class MissionCommand {
 
@@ -11,7 +13,8 @@ public class MissionCommand {
     private String messageType;
     private String invokingService;
     private long timestamp;
-    Body bodyObject;
+    private Body bodyObject;
+    private Map<String, String> header = new HashMap<>();
 
     // Getter Methods
 
@@ -75,6 +78,14 @@ public class MissionCommand {
 
     public void setMission(Mission m){
         this.setBody(Json.decodeValue(m.toString(), Body.class));
+    }
+
+    public Map<String, String> getHeader() {
+        return header;
+    }
+
+    public void setHeader(Map<String, String> header) {
+        this.header = header;
     }
 
     @Override

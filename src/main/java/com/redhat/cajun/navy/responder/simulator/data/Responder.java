@@ -2,6 +2,7 @@ package com.redhat.cajun.navy.responder.simulator.data;
 
 import java.util.Deque;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 
@@ -36,6 +37,8 @@ public class Responder {
     private double distanceUnit;
 
     private Status status = Status.RECEIVED;
+
+    private Map<String, String> header;
 
     public enum Status {
         RECEIVED("RECEIVED"),
@@ -201,6 +204,14 @@ public class Responder {
             intermediateStep.setWayPoint(false);
             queue.addFirst(intermediateStep);
         }
+    }
+
+    public Map<String, String> getHeader() {
+        return header;
+    }
+
+    public void setHeader(Map<String, String> header) {
+        this.header = header;
     }
 
     @Override

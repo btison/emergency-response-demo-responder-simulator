@@ -16,6 +16,10 @@ import java.util.concurrent.CompletableFuture;
 import com.redhat.cajun.navy.responder.simulator.data.Mission;
 import com.redhat.cajun.navy.responder.simulator.data.MissionCommand;
 import com.redhat.cajun.navy.responder.simulator.data.Responder;
+import com.redhat.cajun.navy.responder.simulator.tracing.TracingUtils;
+import io.opentracing.Span;
+import io.opentracing.Tracer;
+import io.opentracing.util.GlobalTracer;
 import io.reactivex.Single;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -32,18 +36,18 @@ import io.vertx.ext.web.client.WebClient;
 
 public class SimulationControl extends AbstractVerticle {
 
-    Logger logger = LoggerFactory.getLogger(SimulationControl.class);
+    private Logger logger = LoggerFactory.getLogger(SimulationControl.class);
 
-    Set<Responder> responders = null;
-    HashMap<String, Queue<Responder>> waitQueue = null;
-    String uri = "/responder/";
-    String host = "responder-service.naps-emergency-response.svc";
-    int port = 8080;
-    double distanceUnit;
+    private Set<Responder> responders = null;
+    private HashMap<String, Queue<Responder>> waitQueue = null;
+    private String uri = "/responder/";
+    private String host;
+    private int port ;
+    private double distanceUnit;
 
-    private int defaultTime = 5000;
+    private WebClient client = null;
 
-    WebClient client = null;
+    private Tracer tracer;
 
     public enum MessageType {
         MissionStartedEvent("MissionStartedEvent"),
@@ -64,6 +68,9 @@ public class SimulationControl extends AbstractVerticle {
 
     @Override
     public void start(Future<Void> startFuture) throws Exception {
+
+        tracer = GlobalTracer.get();
+
         responders = Collections.synchronizedSet(new HashSet<>(150));
         waitQueue = new HashMap<>(150);
 
@@ -77,7 +84,7 @@ public class SimulationControl extends AbstractVerticle {
         // subscribe to Eventbus for incoming messages
         vertx.eventBus().consumer(config().getString(RES_INQUEUE, RES_INQUEUE), this::onMessage);
 
-        defaultTime = config().getInteger("interval", 10000);
+        int defaultTime = config().getInteger("interval", 10000);
 
         long timerID = vertx.setPeriodic(defaultTime, id -> {
 
@@ -186,11 +193,14 @@ public class SimulationControl extends AbstractVerticle {
                         r.isContinue(), r.getStatus().getActionType());
 
         DeliveryOptions options = new DeliveryOptions().addHeader("action", Action.PUBLISH_UPDATE.getActionType()).addHeader("key",r.getIncidentId()+r.getResponderId());
+        Span span = TracingUtils.buildChildSpan(Action.PUBLISH_UPDATE.getActionType(), r.getHeader(), tracer);
+        TracingUtils.injectInEventBusMessage(span.context(), options, tracer);
         vertx.eventBus().send(RES_OUTQUEUE, responder.toString(), options,
                 reply -> {
                     if (!reply.succeeded()) {
                         logger.error("EventBus: Responder update message not accepted "+r);
                     }
+                    span.finish();
                 });
 
     }
@@ -206,27 +216,27 @@ public class SimulationControl extends AbstractVerticle {
             else {
                 try {
                     logger.info(mc);
-                        Responder r = getResponder(mc, MessageType.MissionStartedEvent);
-                        r.setDistanceUnit(distanceUnit);
-                        if (!responders.contains(r))
-                            synchronized (this) {
-                                responders.add(r);
-                            }
-                        else {
-                            synchronized (this) {
-                                if (waitQueue.containsKey(r.getResponderId())) {
-                                    Queue<Responder> q = waitQueue.get(r.getResponderId());
-                                    q.add(r);
-                                    waitQueue.replace(r.getResponderId(), q);
-                                } else {
-                                    Queue<Responder> q = new LinkedList<>();
-                                    q.add(r);
-                                    waitQueue.put(r.getResponderId(), q);
-                                }
+                    Responder r = getResponder(mc, MessageType.MissionStartedEvent);
+                    r.setDistanceUnit(distanceUnit);
+                    if (!responders.contains(r))
+                        synchronized (this) {
+                            responders.add(r);
+                        }
+                    else {
+                        synchronized (this) {
+                            if (waitQueue.containsKey(r.getResponderId())) {
+                                Queue<Responder> q = waitQueue.get(r.getResponderId());
+                                q.add(r);
+                                waitQueue.replace(r.getResponderId(), q);
+                            } else {
+                                Queue<Responder> q = new LinkedList<>();
+                                q.add(r);
+                                waitQueue.put(r.getResponderId(), q);
                             }
                         }
+                    }
                 } catch (UnWantedResponderEvent re) {
-                        re.printStackTrace();
+                    re.printStackTrace();
                 }
             }
         }, res -> {
@@ -250,22 +260,28 @@ public class SimulationControl extends AbstractVerticle {
             return;
         }
         String action = message.headers().get("action");
-        switch (action) {
-            case "CREATE_ENTRY":
-                MissionCommand mc = Json.decodeValue(String.valueOf(message.body()), MissionCommand.class);
-                addResponder(mc);
-                message.reply("received");
-                break;
-            case "RESPONDER_MSG":
-                Responder r = Json.decodeValue(String.valueOf(message.body()), Responder.class);
-                synchronized (this){
+        Span span = TracingUtils.buildChildSpan(action, message, tracer);
+        try {
+            switch (action) {
+                case "CREATE_ENTRY":
+                    MissionCommand mc = Json.decodeValue(String.valueOf(message.body()), MissionCommand.class);
+                    TracingUtils.injectInHeaderMap(span.context(), mc.getHeader(), tracer);
+                    addResponder(mc);
+                    message.reply("received");
+                    break;
+                case "RESPONDER_MSG":
+                    Responder r = Json.decodeValue(String.valueOf(message.body()), Responder.class);
+                    synchronized (this) {
                         setResponderStatus(r);
-                }
-                message.reply("request processed");
-                break;
+                    }
+                    message.reply("request processed");
+                    break;
 
-            default:
-                message.fail(ErrorCodes.BAD_ACTION.ordinal(), "Bad action: " + action);
+                default:
+                    message.fail(ErrorCodes.BAD_ACTION.ordinal(), "Bad action: " + action);
+            }
+        } finally {
+            span.finish();
         }
     }
 
@@ -320,7 +336,7 @@ public class SimulationControl extends AbstractVerticle {
                 }).doOnSuccess(aBoolean -> {
                     r.setHuman(aBoolean);
                 }).subscribe();
-
+            r.setHeader(mc.getHeader());
             return r;
         }
 
